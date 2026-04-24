@@ -22,7 +22,6 @@ async function telnyxAction(callControlId, action, payload = {}) {
 app.post("/webhook", async (req, res) => {
   console.log("CALL EVENT:", JSON.stringify(req.body, null, 2));
 
-  // VERY IMPORTANT: respond fast
   res.sendStatus(200);
 
   const eventType = req.body?.data?.event_type;
@@ -40,13 +39,11 @@ app.post("/webhook", async (req, res) => {
   }
 
   try {
-    // 1. Incoming call
     if (eventType === "call.initiated") {
       console.log("Answering call...");
       await telnyxAction(callControlId, "answer");
     }
 
-    // 2. After answer → start AI conversation
     if (eventType === "call.answered") {
       console.log("Starting AI gather...");
 
@@ -56,45 +53,49 @@ app.post("/webhook", async (req, res) => {
           properties: {
             appointment_day: {
               type: "string",
-              description: "Ziua pentru programare",
+              description:
+                "Ziua programarii, in limba romana. Exemplu: luni, marti, maine, 25 aprilie.",
             },
             appointment_time: {
               type: "string",
-              description: "Ora programarii",
+              description:
+                "Ora programarii. Exemplu: 10:00, ora 15, 15:30.",
             },
             reason: {
               type: "string",
-              description: "Motivul programarii",
+              description:
+                "Motivul programarii, in limba romana. Exemplu: schimb ulei, consultatie, intalnire.",
             },
           },
-          required: ["appointment_day", "appointment_time"],
+          required: ["appointment_day", "appointment_time", "reason"],
         },
+
         assistant: {
+          instructions:
+            "Esti un asistent telefonic roman. Vorbesti DOAR in limba romana. Nu vorbi niciodata in engleza. Scopul tau este sa programezi o intalnire. Intreaba clientul pentru ziua, ora si motivul programarii. Daca lipseste o informatie, cere clarificare in romana.",
           greeting:
-            "Salut! Spune-mi te rog pentru ce zi, la ce ora si pentru ce motiv vrei programarea.",
+            "Salut! Pentru ce zi, la ce ora si pentru ce motiv doresti programarea?",
+          voice: "female",
+          language: "ro-RO",
           transcription: {
             language: "ro",
           },
         },
+
         send_partial_results: true,
-        gather_ended_speech: "Perfect, am notat. Multumesc!",
+        gather_ended_speech:
+          "Perfect, am notat detaliile programarii. Multumesc!",
       });
     }
 
-    // 3. Partial speech (optional debug)
     if (eventType === "call.ai_gather.partial_results") {
       console.log("PARTIAL RESULT:");
       console.log(JSON.stringify(payload, null, 2));
     }
 
-    // 4. Final result
     if (eventType === "call.ai_gather.ended") {
       console.log("FINAL RESULT:");
       console.log(JSON.stringify(payload, null, 2));
-
-      // 👉 HERE later we will:
-      // - save to Google Sheets
-      // - check Google Calendar availability
 
       await telnyxAction(callControlId, "speak", {
         payload: "Programarea ta a fost inregistrata. O zi buna!",
@@ -103,7 +104,6 @@ app.post("/webhook", async (req, res) => {
       });
     }
 
-    // 5. End call AFTER confirmation speech
     if (eventType === "call.speak.ended") {
       console.log("Call finished. Hanging up...");
       await telnyxAction(callControlId, "hangup");
