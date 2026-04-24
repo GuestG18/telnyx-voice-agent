@@ -21,7 +21,6 @@ async function telnyxAction(callControlId, action, payload = {}) {
 
 app.post("/webhook", async (req, res) => {
   console.log("CALL EVENT:", JSON.stringify(req.body, null, 2));
-
   res.sendStatus(200);
 
   const eventType = req.body?.data?.event_type;
@@ -45,7 +44,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     if (eventType === "call.answered") {
-      console.log("Starting AI gather...");
+      console.log("Starting AI gather with original clear voice settings...");
 
       await telnyxAction(callControlId, "gather_using_ai", {
         parameters: {
@@ -53,28 +52,23 @@ app.post("/webhook", async (req, res) => {
           properties: {
             appointment_day: {
               type: "string",
-              description:
-                "Ziua programarii, in limba romana. Exemplu: luni, marti, maine, 25 aprilie.",
+              description: "Ziua programarii. Exemplu: luni, marti, maine.",
             },
             appointment_time: {
               type: "string",
-              description:
-                "Ora programarii. Exemplu: 10:00, ora 15, 15:30.",
+              description: "Ora programarii. Exemplu: ora 10, 15:30.",
             },
             reason: {
               type: "string",
-              description:
-                "Motivul programarii, in limba romana. Exemplu: schimb ulei, consultatie, intalnire.",
+              description: "Motivul programarii.",
             },
           },
-          required: ["appointment_day", "appointment_time", "reason"],
+          required: ["appointment_day", "appointment_time"],
         },
 
         assistant: {
-          instructions:
-            "Esti un asistent telefonic roman. Vorbesti DOAR in limba romana. Nu vorbi niciodata in engleza. Scopul tau este sa programezi o intalnire. Intreaba clientul pentru ziua, ora si motivul programarii. Daca lipseste o informatie, cere clarificare in romana.",
           greeting:
-            "Salut! Pentru ce zi, la ce ora si pentru ce motiv doresti programarea?",
+            "Salut! Spune-mi te rog pentru ce zi si la ce ora vrei programarea.",
           voice: "female",
           language: "ro-RO",
           transcription: {
@@ -83,8 +77,7 @@ app.post("/webhook", async (req, res) => {
         },
 
         send_partial_results: true,
-        gather_ended_speech:
-          "Perfect, am notat detaliile programarii. Multumesc!",
+        gather_ended_speech: "Perfect, am notat. Multumesc!",
       });
     }
 
@@ -102,6 +95,16 @@ app.post("/webhook", async (req, res) => {
         voice: "female",
         language: "ro-RO",
       });
+    }
+
+    if (eventType === "call.conversation.ended") {
+      console.log("CONVERSATION ENDED:");
+      console.log(JSON.stringify(payload, null, 2));
+
+      const messages = payload?.messages || [];
+      for (const msg of messages) {
+        console.log(`${msg.role}: ${msg.content}`);
+      }
     }
 
     if (eventType === "call.speak.ended") {
