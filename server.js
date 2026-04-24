@@ -6,8 +6,6 @@ app.use(express.json());
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 
-const callState = new Map();
-
 async function telnyxAction(callControlId, action, payload = {}) {
   return axios.post(
     `https://api.telnyx.com/v2/calls/${callControlId}/actions/${action}`,
@@ -44,11 +42,9 @@ app.post("/webhook", async (req, res) => {
     if (eventType === "call.initiated") {
       console.log("Answering call...");
 
-      callState.set(callControlId, {
-        step: "intro",
-      });
-
       await telnyxAction(callControlId, "answer");
+
+      console.log("Speaking clear Romanian intro...");
 
       await telnyxAction(callControlId, "speak", {
         payload:
@@ -59,57 +55,34 @@ app.post("/webhook", async (req, res) => {
     }
 
     if (eventType === "call.speak.ended") {
-      const state = callState.get(callControlId);
+      console.log("Intro ended. Starting AI gather...");
 
-      if (state?.step === "intro") {
-        console.log("Intro speech ended. Starting AI gather...");
-
-        callState.set(callControlId, {
-          step: "gathering",
-        });
-
-        await telnyxAction(callControlId, "gather_using_ai", {
-          parameters: {
-            type: "object",
-            properties: {
-              appointment_day: {
-                type: "string",
-                description:
-                  "Ziua programarii. Exemplu: luni, marti, maine, 25 aprilie.",
-              },
-              appointment_time: {
-                type: "string",
-                description:
-                  "Ora programarii. Exemplu: ora 10, 15:30.",
-              },
-              reason: {
-                type: "string",
-                description:
-                  "Motivul programarii. Exemplu: schimb ulei, consultatie, intalnire.",
-              },
+      await telnyxAction(callControlId, "gather_using_ai", {
+        parameters: {
+          type: "object",
+          properties: {
+            appointment_day: {
+              type: "string",
+              description: "Ziua programarii",
             },
-            required: ["appointment_day", "appointment_time"],
-          },
-          assistant: {
-            instructions:
-              "Asculta utilizatorul si extrage doar informatiile pentru programare. Nu purta conversatie lunga. Daca lipseste ziua sau ora, intreaba scurt in romana.",
-            transcription: {
-              language: "ro",
+            appointment_time: {
+              type: "string",
+              description: "Ora programarii",
+            },
+            reason: {
+              type: "string",
+              description: "Motivul programarii",
             },
           },
-          send_partial_results: true,
-          gather_ended_speech: "Perfect, am notat. Multumesc!",
-        });
-
-        return;
-      }
-
-      if (state?.step === "confirmation") {
-        console.log("Confirmation speech ended. Hanging up...");
-
-        callState.delete(callControlId);
-        await telnyxAction(callControlId, "hangup");
-      }
+          required: ["appointment_day", "appointment_time"],
+        },
+        assistant: {
+          transcription: {
+            language: "ro",
+          },
+        },
+        send_partial_results: true,
+      });
     }
 
     if (eventType === "call.ai_gather.partial_results") {
@@ -121,25 +94,12 @@ app.post("/webhook", async (req, res) => {
       console.log("FINAL RESULT:");
       console.log(JSON.stringify(payload, null, 2));
 
-      callState.set(callControlId, {
-        step: "confirmation",
-      });
-
-      await telnyxAction(callControlId, "speak", {
-        payload: "Programarea ta a fost inregistrata. O zi buna!",
-        voice: "female",
-        language: "ro-RO",
-      });
+      await telnyxAction(callControlId, "hangup");
     }
 
     if (eventType === "call.conversation.ended") {
       console.log("CONVERSATION ENDED:");
       console.log(JSON.stringify(payload, null, 2));
-    }
-
-    if (eventType === "call.hangup") {
-      console.log("Call hung up. Cleaning state...");
-      callState.delete(callControlId);
     }
   } catch (err) {
     console.error("TELNYX ERROR:", err.response?.data || err.message);
