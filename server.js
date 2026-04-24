@@ -6,6 +6,8 @@ app.use(express.json());
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 
+const callState = new Map();
+
 async function telnyxAction(callControlId, action, payload = {}) {
   return axios.post(
     `https://api.telnyx.com/v2/calls/${callControlId}/actions/${action}`,
@@ -22,11 +24,11 @@ async function telnyxAction(callControlId, action, payload = {}) {
 app.post("/webhook", async (req, res) => {
   console.log("CALL EVENT:", JSON.stringify(req.body, null, 2));
 
-  // Respond fast to Telnyx
   res.sendStatus(200);
 
   const eventType = req.body?.data?.event_type;
-  const callControlId = req.body?.data?.payload?.call_control_id;
+  const payload = req.body?.data?.payload;
+  const callControlId = payload?.call_control_id;
 
   if (!TELNYX_API_KEY) {
     console.error("Missing TELNYX_API_KEY environment variable");
@@ -42,24 +44,105 @@ app.post("/webhook", async (req, res) => {
     if (eventType === "call.initiated") {
       console.log("Answering call...");
 
+      callState.set(callControlId, {
+        step: "intro",
+      });
+
       await telnyxAction(callControlId, "answer");
 
-      console.log("Call answered. Speaking...");
-
       await telnyxAction(callControlId, "speak", {
-        payload: "Salut! Acesta este primul tau apel automat.",
+        payload:
+          "Salut! Spune-mi te rog pentru ce zi si la ce ora vrei programarea.",
         voice: "female",
         language: "ro-RO",
       });
     }
 
     if (eventType === "call.speak.ended") {
-      console.log("Speech ended. Hanging up...");
+      const state = callState.get(callControlId);
 
-      await telnyxAction(callControlId, "hangup");
+      if (state?.step === "intro") {
+        console.log("Intro speech ended. Starting AI gather...");
+
+        callState.set(callControlId, {
+          step: "gathering",
+        });
+
+        await telnyxAction(callControlId, "gather_using_ai", {
+          parameters: {
+            type: "object",
+            properties: {
+              appointment_day: {
+                type: "string",
+                description:
+                  "Ziua programarii. Exemplu: luni, marti, maine, 25 aprilie.",
+              },
+              appointment_time: {
+                type: "string",
+                description:
+                  "Ora programarii. Exemplu: ora 10, 15:30.",
+              },
+              reason: {
+                type: "string",
+                description:
+                  "Motivul programarii. Exemplu: schimb ulei, consultatie, intalnire.",
+              },
+            },
+            required: ["appointment_day", "appointment_time"],
+          },
+          assistant: {
+            instructions:
+              "Asculta utilizatorul si extrage doar informatiile pentru programare. Nu purta conversatie lunga. Daca lipseste ziua sau ora, intreaba scurt in romana.",
+            transcription: {
+              language: "ro",
+            },
+          },
+          send_partial_results: true,
+          gather_ended_speech: "Perfect, am notat. Multumesc!",
+        });
+
+        return;
+      }
+
+      if (state?.step === "confirmation") {
+        console.log("Confirmation speech ended. Hanging up...");
+
+        callState.delete(callControlId);
+        await telnyxAction(callControlId, "hangup");
+      }
+    }
+
+    if (eventType === "call.ai_gather.partial_results") {
+      console.log("PARTIAL RESULT:");
+      console.log(JSON.stringify(payload, null, 2));
+    }
+
+    if (eventType === "call.ai_gather.ended") {
+      console.log("FINAL RESULT:");
+      console.log(JSON.stringify(payload, null, 2));
+
+      callState.set(callControlId, {
+        step: "confirmation",
+      });
+
+      await telnyxAction(callControlId, "speak", {
+        payload: "Programarea ta a fost inregistrata. O zi buna!",
+        voice: "female",
+        language: "ro-RO",
+      });
+    }
+
+    if (eventType === "call.conversation.ended") {
+      console.log("CONVERSATION ENDED:");
+      console.log(JSON.stringify(payload, null, 2));
+    }
+
+    if (eventType === "call.hangup") {
+      console.log("Call hung up. Cleaning state...");
+      callState.delete(callControlId);
     }
   } catch (err) {
-    console.error("TELNYX API ERROR:", err.response?.data || err.message);
+    console.error("TELNYX ERROR:", err.response?.data || err.message);
   }
 });
 
