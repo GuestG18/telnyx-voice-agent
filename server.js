@@ -22,11 +22,11 @@ async function telnyxAction(callControlId, action, payload = {}) {
 app.post("/webhook", async (req, res) => {
   console.log("CALL EVENT:", JSON.stringify(req.body, null, 2));
 
-  // Respond fast to Telnyx
   res.sendStatus(200);
 
   const eventType = req.body?.data?.event_type;
-  const callControlId = req.body?.data?.payload?.call_control_id;
+  const payload = req.body?.data?.payload;
+  const callControlId = payload?.call_control_id;
 
   if (!TELNYX_API_KEY) {
     console.error("Missing TELNYX_API_KEY environment variable");
@@ -43,11 +43,29 @@ app.post("/webhook", async (req, res) => {
       console.log("Answering call...");
 
       await telnyxAction(callControlId, "answer");
+    }
 
-      console.log("Call answered. Speaking...");
+    if (eventType === "call.answered") {
+      console.log("Call answered. Starting speech gather...");
+
+      await telnyxAction(callControlId, "gather_using_speak", {
+        payload:
+          "Salut! Spune-mi te rog pentru ce zi și la ce oră vrei programarea.",
+        voice: "female",
+        language: "ro-RO",
+        minimum_digits: 1,
+        maximum_digits: 1,
+        valid_digits: "1234567890",
+        timeout_millis: 10000,
+      });
+    }
+
+    if (eventType === "call.gather.ended") {
+      console.log("Gather ended:");
+      console.log(JSON.stringify(payload, null, 2));
 
       await telnyxAction(callControlId, "speak", {
-      payload: "Salut! Ai o programare astăzi la ora 15:30. Te rugăm să confirmi.",
+        payload: "Am primit răspunsul tău. Mulțumesc!",
         voice: "female",
         language: "ro-RO",
       });
