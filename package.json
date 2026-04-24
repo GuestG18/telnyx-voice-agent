@@ -1,11 +1,13 @@
 {
   "name": "telnyx-voice-agent",
   "version": "1.0.0",
+  "description": "Telnyx voice agent using webhook + call control",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "axios": "^1.7.9"
   }
 }
