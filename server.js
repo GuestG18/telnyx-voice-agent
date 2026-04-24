@@ -47,7 +47,7 @@ app.post("/webhook", async (req, res) => {
       console.log("Call answered. Speaking...");
 
       await telnyxAction(callControlId, "speak", {
-        payload: "Salut! Acesta este primul tau apel automat.",
+      payload: "Salut! Ai o programare astăzi la ora 15:30. Te rugăm să confirmi.",
         voice: "female",
         language: "ro-RO",
       });
