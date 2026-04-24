@@ -21,11 +21,12 @@ async function telnyxAction(callControlId, action, payload = {}) {
 
 app.post("/webhook", async (req, res) => {
   console.log("CALL EVENT:", JSON.stringify(req.body, null, 2));
+
+  // Respond fast to Telnyx
   res.sendStatus(200);
 
   const eventType = req.body?.data?.event_type;
-  const payload = req.body?.data?.payload;
-  const callControlId = payload?.call_control_id;
+  const callControlId = req.body?.data?.payload?.call_control_id;
 
   if (!TELNYX_API_KEY) {
     console.error("Missing TELNYX_API_KEY environment variable");
@@ -40,79 +41,25 @@ app.post("/webhook", async (req, res) => {
   try {
     if (eventType === "call.initiated") {
       console.log("Answering call...");
+
       await telnyxAction(callControlId, "answer");
-    }
 
-    if (eventType === "call.answered") {
-      console.log("Starting AI gather with original clear voice settings...");
-
-      await telnyxAction(callControlId, "gather_using_ai", {
-        parameters: {
-          type: "object",
-          properties: {
-            appointment_day: {
-              type: "string",
-              description: "Ziua programarii. Exemplu: luni, marti, maine.",
-            },
-            appointment_time: {
-              type: "string",
-              description: "Ora programarii. Exemplu: ora 10, 15:30.",
-            },
-            reason: {
-              type: "string",
-              description: "Motivul programarii.",
-            },
-          },
-          required: ["appointment_day", "appointment_time"],
-        },
-
-        assistant: {
-          greeting:
-            "Salut! Spune-mi te rog pentru ce zi si la ce ora vrei programarea.",
-          voice: "female",
-          language: "ro-RO",
-          transcription: {
-            language: "ro",
-          },
-        },
-
-        send_partial_results: true,
-        gather_ended_speech: "Perfect, am notat. Multumesc!",
-      });
-    }
-
-    if (eventType === "call.ai_gather.partial_results") {
-      console.log("PARTIAL RESULT:");
-      console.log(JSON.stringify(payload, null, 2));
-    }
-
-    if (eventType === "call.ai_gather.ended") {
-      console.log("FINAL RESULT:");
-      console.log(JSON.stringify(payload, null, 2));
+      console.log("Call answered. Speaking...");
 
       await telnyxAction(callControlId, "speak", {
-        payload: "Programarea ta a fost inregistrata. O zi buna!",
+        payload: "Salut! Acesta este primul tau apel automat.",
         voice: "female",
         language: "ro-RO",
       });
     }
 
-    if (eventType === "call.conversation.ended") {
-      console.log("CONVERSATION ENDED:");
-      console.log(JSON.stringify(payload, null, 2));
-
-      const messages = payload?.messages || [];
-      for (const msg of messages) {
-        console.log(`${msg.role}: ${msg.content}`);
-      }
-    }
-
     if (eventType === "call.speak.ended") {
-      console.log("Call finished. Hanging up...");
+      console.log("Speech ended. Hanging up...");
+
       await telnyxAction(callControlId, "hangup");
     }
   } catch (err) {
-    console.error("TELNYX ERROR:", err.response?.data || err.message);
+    console.error("TELNYX API ERROR:", err.response?.data || err.message);
   }
 });
 
