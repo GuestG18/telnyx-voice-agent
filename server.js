@@ -22,6 +22,15 @@ async function telnyxAction(callControlId, action, payload = {}) {
   );
 }
 
+async function speakIntro(callControlId) {
+  await telnyxAction(callControlId, "speak", {
+    payload:
+      "Salut! Sunt agentul tau automat. Spune-mi te rog pentru ce zi si la ce ora vrei programarea.",
+    voice: "female",
+    language: "ro-RO",
+  });
+}
+
 app.get("/call-me", async (req, res) => {
   try {
     if (
@@ -72,6 +81,7 @@ app.post("/webhook", async (req, res) => {
   const eventType = req.body?.data?.event_type;
   const payload = req.body?.data?.payload;
   const callControlId = payload?.call_control_id;
+  const direction = payload?.direction;
 
   if (!TELNYX_API_KEY) {
     console.error("Missing TELNYX_API_KEY environment variable");
@@ -85,18 +95,21 @@ app.post("/webhook", async (req, res) => {
 
   try {
     if (eventType === "call.initiated") {
-      console.log("Answering call...");
+      console.log("Call initiated. Direction:", direction);
 
-      await telnyxAction(callControlId, "answer");
+      // For inbound calls, we must answer first.
+      if (direction === "incoming") {
+        console.log("Inbound call. Answering...");
+        await telnyxAction(callControlId, "answer");
+      }
 
-      console.log("Speaking clear Romanian intro...");
+      // For outbound calls, do NOT answer.
+      // Wait for call.answered, then speak.
+    }
 
-      await telnyxAction(callControlId, "speak", {
-        payload:
-          "Salut! Spune-mi te rog pentru ce zi si la ce ora vrei programarea.",
-        voice: "female",
-        language: "ro-RO",
-      });
+    if (eventType === "call.answered") {
+      console.log("Call answered. Speaking intro...");
+      await speakIntro(callControlId);
     }
 
     if (eventType === "call.speak.ended") {
@@ -139,12 +152,28 @@ app.post("/webhook", async (req, res) => {
       console.log("FINAL RESULT:");
       console.log(JSON.stringify(payload, null, 2));
 
-      await telnyxAction(callControlId, "hangup");
+      await telnyxAction(callControlId, "speak", {
+        payload: "Perfect, am notat detaliile. Multumesc!",
+        voice: "female",
+        language: "ro-RO",
+      });
+
+      setTimeout(async () => {
+        try {
+          await telnyxAction(callControlId, "hangup");
+        } catch (err) {
+          console.error("HANGUP ERROR:", err.response?.data || err.message);
+        }
+      }, 3000);
     }
 
     if (eventType === "call.conversation.ended") {
       console.log("CONVERSATION ENDED:");
       console.log(JSON.stringify(payload, null, 2));
+    }
+
+    if (eventType === "call.hangup") {
+      console.log("Call ended.");
     }
   } catch (err) {
     console.error("TELNYX ERROR:", err.response?.data || err.message);
