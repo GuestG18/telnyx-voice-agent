@@ -5,12 +5,13 @@ const app = express();
 app.use(express.json({ limit: "10mb" }));
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
-const TELNYX_CONNECTION_ID = process.env.TELNYX_CONNECTION_ID; // old Voice API / Call Control app ID
+const TELNYX_CONNECTION_ID = process.env.TELNYX_CONNECTION_ID; // Voice API / Call Control app ID
 const TELNYX_FROM_NUMBER = process.env.TELNYX_FROM_NUMBER;
 const MY_PHONE_NUMBER = process.env.MY_PHONE_NUMBER;
 
 const ELEVEN_SIP_URI =
-  process.env.ELEVEN_SIP_URI || "sip:sip.rtc.elevenlabs.io:5060";
+  process.env.ELEVEN_SIP_URI ||
+  "sip:+40316060171@sip.rtc.elevenlabs.io:5060";
 
 const appointments = [];
 
@@ -111,7 +112,6 @@ app.post("/webhook", async (req, res) => {
   const eventType = req.body?.data?.event_type;
   const payload = req.body?.data?.payload;
   const callControlId = payload?.call_control_id;
-  const direction = payload?.direction;
 
   console.log("TELNYX WEBHOOK:", eventType);
   console.log(JSON.stringify(payload, null, 2));
@@ -119,8 +119,8 @@ app.post("/webhook", async (req, res) => {
   if (!TELNYX_API_KEY || !callControlId) return;
 
   try {
-    if (eventType === "call.answered" && direction === "outgoing") {
-      console.log("Outbound call answered. Transferring to ElevenLabs SIP...");
+    if (eventType === "call.answered") {
+      console.log("Call answered. Transferring to ElevenLabs SIP...");
 
       await telnyxAction(callControlId, "transfer", {
         to: ELEVEN_SIP_URI,
@@ -134,7 +134,10 @@ app.post("/webhook", async (req, res) => {
       console.log("Call ended:", payload?.hangup_cause);
     }
   } catch (err) {
-    console.error("TELNYX WEBHOOK ACTION ERROR:", err.response?.data || err.message);
+    console.error(
+      "TELNYX WEBHOOK ACTION ERROR:",
+      err.response?.data || err.message
+    );
   }
 });
 
@@ -169,6 +172,7 @@ app.post("/elevenlabs/schedule-appointment", (req, res) => {
 app.post("/elevenlabs/post-call", (req, res) => {
   console.log("ELEVENLABS POST-CALL WEBHOOK:");
   console.log(JSON.stringify(req.body, null, 2));
+
   res.sendStatus(200);
 });
 
