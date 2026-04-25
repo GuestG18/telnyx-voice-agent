@@ -5,6 +5,9 @@ const app = express();
 app.use(express.json());
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+const TELNYX_CONNECTION_ID = process.env.TELNYX_CONNECTION_ID;
+const TELNYX_FROM_NUMBER = process.env.TELNYX_FROM_NUMBER;
+const MY_PHONE_NUMBER = process.env.MY_PHONE_NUMBER;
 
 async function telnyxAction(callControlId, action, payload = {}) {
   return axios.post(
@@ -18,6 +21,48 @@ async function telnyxAction(callControlId, action, payload = {}) {
     }
   );
 }
+
+app.get("/call-me", async (req, res) => {
+  try {
+    if (
+      !TELNYX_API_KEY ||
+      !TELNYX_CONNECTION_ID ||
+      !TELNYX_FROM_NUMBER ||
+      !MY_PHONE_NUMBER
+    ) {
+      return res.status(400).json({
+        error:
+          "Missing TELNYX_API_KEY, TELNYX_CONNECTION_ID, TELNYX_FROM_NUMBER, or MY_PHONE_NUMBER",
+      });
+    }
+
+    const response = await axios.post(
+      "https://api.telnyx.com/v2/calls",
+      {
+        connection_id: TELNYX_CONNECTION_ID,
+        from: TELNYX_FROM_NUMBER,
+        to: MY_PHONE_NUMBER,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${TELNYX_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("Outbound call started:");
+    console.log(JSON.stringify(response.data, null, 2));
+
+    res.json({
+      message: "Calling you now...",
+      data: response.data,
+    });
+  } catch (err) {
+    console.error("OUTBOUND CALL ERROR:", err.response?.data || err.message);
+    res.status(500).json(err.response?.data || { error: err.message });
+  }
+});
 
 app.post("/webhook", async (req, res) => {
   console.log("CALL EVENT:", JSON.stringify(req.body, null, 2));
