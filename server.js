@@ -5,13 +5,9 @@ const app = express();
 app.use(express.json({ limit: "10mb" }));
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
-const TELNYX_CONNECTION_ID = process.env.TELNYX_CONNECTION_ID; // Voice API / Call Control app ID
+const TELNYX_CONNECTION_ID = process.env.TELNYX_CONNECTION_ID;
 const TELNYX_FROM_NUMBER = process.env.TELNYX_FROM_NUMBER;
 const MY_PHONE_NUMBER = process.env.MY_PHONE_NUMBER;
-
-const ELEVEN_SIP_URI =
-  process.env.ELEVEN_SIP_URI ||
-  "sip:+40316060171@sip.rtc.elevenlabs.io:5060";
 
 const appointments = [];
 
@@ -27,31 +23,17 @@ function debugEnv() {
     TELNYX_CONNECTION_ID: TELNYX_CONNECTION_ID || "missing",
     TELNYX_FROM_NUMBER: TELNYX_FROM_NUMBER || "missing",
     MY_PHONE_NUMBER: MY_PHONE_NUMBER || "missing",
-    ELEVEN_SIP_URI,
   };
 }
 
-async function telnyxAction(callControlId, action, payload = {}) {
-  return axios.post(
-    `https://api.telnyx.com/v2/calls/${callControlId}/actions/${action}`,
-    payload,
-    {
-      headers: {
-        Authorization: `Bearer ${TELNYX_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-    }
-  );
-}
-
 app.get("/", (req, res) => {
-  res.send("Backend running. Telnyx callback transfers to ElevenLabs SIP.");
+  res.send("Backend running. Telnyx AI handles voice agent calls.");
 });
 
 app.get("/health", (req, res) => {
   res.json({
     ok: true,
-    mode: "telnyx-transfer-to-elevenlabs-sip",
+    mode: "telnyx-ai-only",
     env: debugEnv(),
   });
 });
@@ -95,8 +77,7 @@ app.get("/call-me", async (req, res) => {
     console.log(JSON.stringify(response.data, null, 2));
 
     res.json({
-      message:
-        "Telnyx is calling now. When answered, backend will transfer call to ElevenLabs SIP.",
+      message: "Telnyx is calling now.",
       to: toNumber,
       data: response.data,
     });
@@ -111,38 +92,50 @@ app.post("/webhook", async (req, res) => {
 
   const eventType = req.body?.data?.event_type;
   const payload = req.body?.data?.payload;
-  const callControlId = payload?.call_control_id;
 
   console.log("TELNYX WEBHOOK:", eventType);
   console.log(JSON.stringify(payload, null, 2));
 
-  if (!TELNYX_API_KEY || !callControlId) return;
+  if (eventType === "call.ai_gather.partial_results") {
+    console.log("AI PARTIAL RESULT:");
+    console.log(JSON.stringify(payload, null, 2));
+  }
 
-  try {
-    if (eventType === "call.answered") {
-      console.log("Call answered. Transferring to ElevenLabs SIP...");
+  if (eventType === "call.ai_gather.ended") {
+    console.log("AI FINAL RESULT:");
+    console.log(JSON.stringify(payload, null, 2));
 
-      await telnyxAction(callControlId, "transfer", {
-        to: ELEVEN_SIP_URI,
-        timeout_secs: 60,
-      });
+    const result = payload?.result || payload?.partial_results || {};
 
-      console.log("Transfer command sent to:", ELEVEN_SIP_URI);
-    }
+    const appointment = {
+      name: result.name || null,
+      phone: payload?.from || null,
+      day: result.appointment_day || result.day || null,
+      time: result.appointment_time || result.time || null,
+      reason: result.reason || null,
+      raw: result,
+      created_at: new Date().toISOString(),
+    };
 
-    if (eventType === "call.hangup") {
-      console.log("Call ended:", payload?.hangup_cause);
-    }
-  } catch (err) {
-    console.error(
-      "TELNYX WEBHOOK ACTION ERROR:",
-      err.response?.data || err.message
-    );
+    appointments.push(appointment);
+
+    console.log("APPOINTMENT SAVED:");
+    console.log(JSON.stringify(appointment, null, 2));
+  }
+
+  if (eventType === "call.conversation.ended") {
+    console.log("CONVERSATION ENDED:");
+    console.log(JSON.stringify(payload, null, 2));
+  }
+
+  if (eventType === "call.hangup") {
+    console.log("CALL ENDED:");
+    console.log(payload?.hangup_cause || "unknown");
   }
 });
 
-app.post("/elevenlabs/schedule-appointment", (req, res) => {
-  console.log("ELEVENLABS TOOL CALL:");
+app.post("/telnyx/save-appointment", (req, res) => {
+  console.log("TELNYX TOOL SAVE APPOINTMENT:");
   console.log(JSON.stringify(req.body, null, 2));
 
   const params = req.body?.parameters || req.body;
@@ -153,7 +146,6 @@ app.post("/elevenlabs/schedule-appointment", (req, res) => {
     day: params.day || params.appointment_day || null,
     time: params.time || params.appointment_time || null,
     reason: params.reason || null,
-    conversation_id: req.body?.conversation_id || null,
     created_at: new Date().toISOString(),
   };
 
@@ -167,13 +159,6 @@ app.post("/elevenlabs/schedule-appointment", (req, res) => {
     message: "Programarea a fost salvată cu succes.",
     appointment,
   });
-});
-
-app.post("/elevenlabs/post-call", (req, res) => {
-  console.log("ELEVENLABS POST-CALL WEBHOOK:");
-  console.log(JSON.stringify(req.body, null, 2));
-
-  res.sendStatus(200);
 });
 
 app.get("/appointments", (req, res) => {
