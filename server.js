@@ -4,32 +4,44 @@ const axios = require("axios");
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
+const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+const TELNYX_CONNECTION_ID = process.env.TELNYX_CONNECTION_ID;
+const TELNYX_FROM_NUMBER = process.env.TELNYX_FROM_NUMBER;
+const MY_PHONE_NUMBER = process.env.MY_PHONE_NUMBER;
+
 const ELEVEN_API_KEY = process.env.ELEVEN_API_KEY;
 const ELEVEN_AGENT_ID = process.env.ELEVEN_AGENT_ID;
 const ELEVEN_PHONE_NUMBER_ID = process.env.ELEVEN_PHONE_NUMBER_ID;
-const MY_PHONE_NUMBER = process.env.MY_PHONE_NUMBER;
 
 const appointments = [];
 
+function mask(value) {
+  if (!value) return "missing";
+  if (value.length <= 10) return "loaded";
+  return `loaded (${value.slice(0, 6)}...${value.slice(-4)})`;
+}
+
 function debugEnv() {
   return {
-    ELEVEN_API_KEY: ELEVEN_API_KEY
-      ? `loaded (${ELEVEN_API_KEY.slice(0, 6)}...${ELEVEN_API_KEY.slice(-4)})`
-      : "missing",
+    TELNYX_API_KEY: mask(TELNYX_API_KEY),
+    TELNYX_CONNECTION_ID: TELNYX_CONNECTION_ID || "missing",
+    TELNYX_FROM_NUMBER: TELNYX_FROM_NUMBER || "missing",
+    MY_PHONE_NUMBER: MY_PHONE_NUMBER || "missing",
+
+    ELEVEN_API_KEY: mask(ELEVEN_API_KEY),
     ELEVEN_AGENT_ID: ELEVEN_AGENT_ID || "missing",
     ELEVEN_PHONE_NUMBER_ID: ELEVEN_PHONE_NUMBER_ID || "missing",
-    MY_PHONE_NUMBER: MY_PHONE_NUMBER || "missing",
   };
 }
 
 app.get("/", (req, res) => {
-  res.send("Backend running. ElevenLabs handles calls via SIP.");
+  res.send("Backend running. Telnyx handles callback, ElevenLabs handles SIP agent.");
 });
 
 app.get("/health", (req, res) => {
   res.json({
     ok: true,
-    mode: "elevenlabs-sip",
+    mode: "telnyx-callback-elevenlabs-sip",
     env: debugEnv(),
   });
 });
@@ -40,45 +52,45 @@ app.get("/call-me", async (req, res) => {
     console.log(JSON.stringify(debugEnv(), null, 2));
 
     if (
-      !ELEVEN_API_KEY ||
-      !ELEVEN_AGENT_ID ||
-      !ELEVEN_PHONE_NUMBER_ID ||
+      !TELNYX_API_KEY ||
+      !TELNYX_CONNECTION_ID ||
+      !TELNYX_FROM_NUMBER ||
       !MY_PHONE_NUMBER
     ) {
       return res.status(400).json({
         error:
-          "Missing ELEVEN_API_KEY, ELEVEN_AGENT_ID, ELEVEN_PHONE_NUMBER_ID, or MY_PHONE_NUMBER",
+          "Missing TELNYX_API_KEY, TELNYX_CONNECTION_ID, TELNYX_FROM_NUMBER, or MY_PHONE_NUMBER",
         env: debugEnv(),
       });
     }
 
+    const toNumber = req.query.to || MY_PHONE_NUMBER;
+
     const response = await axios.post(
-      "https://api.elevenlabs.io/v1/convai/twilio/outbound-call",
+      "https://api.telnyx.com/v2/calls",
       {
-        agent_id: ELEVEN_AGENT_ID,
-        agent_phone_number_id: ELEVEN_PHONE_NUMBER_ID,
-        to_number: MY_PHONE_NUMBER,
+        connection_id: TELNYX_CONNECTION_ID,
+        from: TELNYX_FROM_NUMBER,
+        to: toNumber,
       },
       {
         headers: {
-          "xi-api-key": ELEVEN_API_KEY,
+          Authorization: `Bearer ${TELNYX_API_KEY}`,
           "Content-Type": "application/json",
         },
       }
     );
 
-    console.log("ElevenLabs outbound call started:");
+    console.log("Telnyx callback started:");
     console.log(JSON.stringify(response.data, null, 2));
 
     res.json({
-      message: "ElevenLabs agent is calling you now...",
+      message: "Telnyx is calling now. The call should route to ElevenLabs Agent via SIP.",
+      to: toNumber,
       data: response.data,
     });
   } catch (err) {
-    console.error(
-      "ELEVENLABS OUTBOUND ERROR:",
-      err.response?.data || err.message
-    );
+    console.error("TELNYX CALLBACK ERROR:", err.response?.data || err.message);
 
     res.status(500).json(err.response?.data || { error: err.message });
   }
