@@ -11,20 +11,44 @@ const MY_PHONE_NUMBER = process.env.MY_PHONE_NUMBER;
 
 const appointments = [];
 
+function debugEnv() {
+  return {
+    ELEVEN_API_KEY: ELEVEN_API_KEY
+      ? `loaded (${ELEVEN_API_KEY.slice(0, 6)}...${ELEVEN_API_KEY.slice(-4)})`
+      : "missing",
+    ELEVEN_AGENT_ID: ELEVEN_AGENT_ID || "missing",
+    ELEVEN_PHONE_NUMBER_ID: ELEVEN_PHONE_NUMBER_ID || "missing",
+    MY_PHONE_NUMBER: MY_PHONE_NUMBER || "missing",
+  };
+}
+
 app.get("/", (req, res) => {
   res.send("Backend running. ElevenLabs handles calls via SIP.");
 });
 
 app.get("/health", (req, res) => {
-  res.json({ ok: true, mode: "elevenlabs-sip" });
+  res.json({
+    ok: true,
+    mode: "elevenlabs-sip",
+    env: debugEnv(),
+  });
 });
 
 app.get("/call-me", async (req, res) => {
   try {
-    if (!ELEVEN_API_KEY || !ELEVEN_AGENT_ID || !ELEVEN_PHONE_NUMBER_ID || !MY_PHONE_NUMBER) {
+    console.log("CALL-ME ENV DEBUG:");
+    console.log(JSON.stringify(debugEnv(), null, 2));
+
+    if (
+      !ELEVEN_API_KEY ||
+      !ELEVEN_AGENT_ID ||
+      !ELEVEN_PHONE_NUMBER_ID ||
+      !MY_PHONE_NUMBER
+    ) {
       return res.status(400).json({
         error:
           "Missing ELEVEN_API_KEY, ELEVEN_AGENT_ID, ELEVEN_PHONE_NUMBER_ID, or MY_PHONE_NUMBER",
+        env: debugEnv(),
       });
     }
 
@@ -51,7 +75,11 @@ app.get("/call-me", async (req, res) => {
       data: response.data,
     });
   } catch (err) {
-    console.error("ELEVENLABS OUTBOUND ERROR:", err.response?.data || err.message);
+    console.error(
+      "ELEVENLABS OUTBOUND ERROR:",
+      err.response?.data || err.message
+    );
+
     res.status(500).json(err.response?.data || { error: err.message });
   }
 });
@@ -87,6 +115,7 @@ app.post("/elevenlabs/schedule-appointment", (req, res) => {
 app.post("/elevenlabs/post-call", (req, res) => {
   console.log("ELEVENLABS POST-CALL WEBHOOK:");
   console.log(JSON.stringify(req.body, null, 2));
+
   res.sendStatus(200);
 });
 
@@ -101,4 +130,6 @@ const port = process.env.PORT || 3000;
 
 app.listen(port, "0.0.0.0", () => {
   console.log(`Backend running on port ${port}`);
+  console.log("STARTUP ENV DEBUG:");
+  console.log(JSON.stringify(debugEnv(), null, 2));
 });
