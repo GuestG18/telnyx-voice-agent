@@ -22,6 +22,32 @@ async function telnyxAction(callControlId, action, payload = {}) {
   );
 }
 
+function printConversation(payload) {
+  if (payload?.message_history) {
+    console.log("MESSAGE HISTORY:");
+    for (const msg of payload.message_history) {
+      console.log(`${msg.role}: ${msg.content}`);
+    }
+  }
+
+  if (payload?.messages) {
+    console.log("MESSAGES:");
+    for (const msg of payload.messages) {
+      console.log(`${msg.role}: ${msg.content}`);
+    }
+  }
+
+  if (payload?.partial_results) {
+    console.log("EXTRACTED PARTIAL RESULTS:");
+    console.log(JSON.stringify(payload.partial_results, null, 2));
+  }
+
+  if (payload?.result) {
+    console.log("FINAL EXTRACTED RESULT:");
+    console.log(JSON.stringify(payload.result, null, 2));
+  }
+}
+
 async function speakIntro(callControlId) {
   await telnyxAction(callControlId, "speak", {
     payload:
@@ -74,7 +100,7 @@ app.get("/call-me", async (req, res) => {
 });
 
 app.post("/webhook", async (req, res) => {
-  console.log("CALL EVENT:", JSON.stringify(req.body, null, 2));
+  console.log("CALL EVENT:", req.body?.data?.event_type);
 
   res.sendStatus(200);
 
@@ -97,14 +123,10 @@ app.post("/webhook", async (req, res) => {
     if (eventType === "call.initiated") {
       console.log("Call initiated. Direction:", direction);
 
-      // For inbound calls, we must answer first.
       if (direction === "incoming") {
         console.log("Inbound call. Answering...");
         await telnyxAction(callControlId, "answer");
       }
-
-      // For outbound calls, do NOT answer.
-      // Wait for call.answered, then speak.
     }
 
     if (eventType === "call.answered") {
@@ -145,12 +167,12 @@ app.post("/webhook", async (req, res) => {
 
     if (eventType === "call.ai_gather.partial_results") {
       console.log("PARTIAL RESULT:");
-      console.log(JSON.stringify(payload, null, 2));
+      printConversation(payload);
     }
 
     if (eventType === "call.ai_gather.ended") {
       console.log("FINAL RESULT:");
-      console.log(JSON.stringify(payload, null, 2));
+      printConversation(payload);
 
       await telnyxAction(callControlId, "speak", {
         payload: "Perfect, am notat detaliile. Multumesc!",
@@ -169,7 +191,7 @@ app.post("/webhook", async (req, res) => {
 
     if (eventType === "call.conversation.ended") {
       console.log("CONVERSATION ENDED:");
-      console.log(JSON.stringify(payload, null, 2));
+      printConversation(payload);
     }
 
     if (eventType === "call.hangup") {
