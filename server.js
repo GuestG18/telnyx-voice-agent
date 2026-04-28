@@ -10,6 +10,7 @@ const TELNYX_FROM_NUMBER = process.env.TELNYX_FROM_NUMBER;
 const MY_PHONE_NUMBER = process.env.MY_PHONE_NUMBER;
 
 const appointments = [];
+const callState = new Map();
 
 function mask(value) {
   if (!value) return "missing";
@@ -24,6 +25,19 @@ function debugEnv() {
     TELNYX_FROM_NUMBER: TELNYX_FROM_NUMBER || "missing",
     MY_PHONE_NUMBER: MY_PHONE_NUMBER || "missing",
   };
+}
+
+async function telnyxAction(callControlId, action, payload = {}) {
+  return axios.post(
+    `https://api.telnyx.com/v2/calls/${callControlId}/actions/${action}`,
+    payload,
+    {
+      headers: {
+        Authorization: `Bearer ${TELNYX_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
 }
 
 app.get("/", (req, res) => {
@@ -77,7 +91,7 @@ app.get("/call-me", async (req, res) => {
     console.log(JSON.stringify(response.data, null, 2));
 
     res.json({
-      message: "Telnyx is calling now.",
+      message: "Telnyx is calling now. The AI assistant will start after answer.",
       to: toNumber,
       data: response.data,
     });
@@ -92,45 +106,137 @@ app.post("/webhook", async (req, res) => {
 
   const eventType = req.body?.data?.event_type;
   const payload = req.body?.data?.payload;
+  const callControlId = payload?.call_control_id;
+  const direction = payload?.direction;
 
   console.log("TELNYX WEBHOOK:", eventType);
   console.log(JSON.stringify(payload, null, 2));
 
-  if (eventType === "call.ai_gather.partial_results") {
-    console.log("AI PARTIAL RESULT:");
-    console.log(JSON.stringify(payload, null, 2));
-  }
+  if (!TELNYX_API_KEY || !callControlId) return;
 
-  if (eventType === "call.ai_gather.ended") {
-    console.log("AI FINAL RESULT:");
-    console.log(JSON.stringify(payload, null, 2));
+  try {
+    if (eventType === "call.initiated") {
+      callState.set(callControlId, {
+        aiStarted: false,
+      });
 
-    const result = payload?.result || payload?.partial_results || {};
+      if (direction === "incoming") {
+        console.log("Incoming call. Answering...");
+        await telnyxAction(callControlId, "answer");
+      }
+    }
 
-    const appointment = {
-      name: result.name || null,
-      phone: payload?.from || null,
-      day: result.appointment_day || result.day || null,
-      time: result.appointment_time || result.time || null,
-      reason: result.reason || null,
-      raw: result,
-      created_at: new Date().toISOString(),
-    };
+    if (eventType === "call.answered") {
+      const state = callState.get(callControlId) || {};
 
-    appointments.push(appointment);
+      if (state.aiStarted) {
+        console.log("AI already started for this call. Skipping.");
+        return;
+      }
 
-    console.log("APPOINTMENT SAVED:");
-    console.log(JSON.stringify(appointment, null, 2));
-  }
+      callState.set(callControlId, {
+        aiStarted: true,
+      });
 
-  if (eventType === "call.conversation.ended") {
-    console.log("CONVERSATION ENDED:");
-    console.log(JSON.stringify(payload, null, 2));
-  }
+      console.log("Call answered. Starting Telnyx AI assistant...");
 
-  if (eventType === "call.hangup") {
-    console.log("CALL ENDED:");
-    console.log(payload?.hangup_cause || "unknown");
+      await telnyxAction(callControlId, "gather_using_ai", {
+        parameters: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "Numele persoanei care face programarea.",
+            },
+            appointment_day: {
+              type: "string",
+              description:
+                "Ziua programarii. Exemplu: luni, marti, maine, 25 aprilie.",
+            },
+            appointment_time: {
+              type: "string",
+              description:
+                "Ora programarii. Exemplu: ora 10, 15:30, doisprezece.",
+            },
+            reason: {
+              type: "string",
+              description:
+                "Motivul programarii. Exemplu: schimb ulei, consultatie, intalnire.",
+            },
+          },
+          required: ["appointment_day", "appointment_time", "reason"],
+        },
+        assistant: {
+          instructions:
+            "Esti un asistent telefonic roman pentru programari. Vorbesti DOAR in limba romana. Nu raspunde in engleza. Nu discuta alte subiecte. Scopul tau este sa obtii ziua, ora, numele si motivul programarii. Daca utilizatorul intreaba altceva, spune politicos ca poti ajuta doar cu programari.",
+          greeting:
+            "Buna ziua! Sunt asistentul automat pentru programari. Spuneti-mi va rog numele, ziua, ora si motivul programarii.",
+          voice: "female",
+          language: "ro-RO",
+          transcription: {
+            language: "ro",
+          },
+        },
+        send_partial_results: true,
+        gather_ended_speech:
+          "Perfect, am notat detaliile programarii. Multumesc!",
+      });
+    }
+
+    if (eventType === "call.ai_gather.partial_results") {
+      console.log("AI PARTIAL RESULT:");
+      console.log(JSON.stringify(payload, null, 2));
+
+      if (payload?.message_history) {
+        console.log("MESSAGE HISTORY:");
+        for (const msg of payload.message_history) {
+          console.log(`${msg.role}: ${msg.content}`);
+        }
+      }
+    }
+
+    if (eventType === "call.ai_gather.ended") {
+      console.log("AI FINAL RESULT:");
+      console.log(JSON.stringify(payload, null, 2));
+
+      const result = payload?.result || payload?.partial_results || {};
+
+      const appointment = {
+        name: result.name || null,
+        phone: payload?.from || payload?.to || null,
+        day: result.appointment_day || result.day || null,
+        time: result.appointment_time || result.time || null,
+        reason: result.reason || null,
+        raw: result,
+        created_at: new Date().toISOString(),
+      };
+
+      appointments.push(appointment);
+
+      console.log("APPOINTMENT SAVED:");
+      console.log(JSON.stringify(appointment, null, 2));
+    }
+
+    if (eventType === "call.conversation.ended") {
+      console.log("CONVERSATION ENDED:");
+      console.log(JSON.stringify(payload, null, 2));
+
+      if (payload?.messages) {
+        console.log("FULL CONVERSATION:");
+        for (const msg of payload.messages) {
+          console.log(`${msg.role}: ${msg.content}`);
+        }
+      }
+    }
+
+    if (eventType === "call.hangup") {
+      console.log("CALL ENDED:");
+      console.log(payload?.hangup_cause || "unknown");
+
+      callState.delete(callControlId);
+    }
+  } catch (err) {
+    console.error("TELNYX AI ERROR:", err.response?.data || err.message);
   }
 });
 
